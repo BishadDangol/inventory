@@ -1,0 +1,206 @@
+﻿@page "/request"
+@using System.Linq;
+
+<nav class="navbar navbar-light bg-light justify-content-between">
+    <h1 class="navbar-brand mb-0 h1">Approve Requests</h1>
+
+</nav>
+
+@*<ul class="nav nav-tabs">
+    <li class="nav-item ">
+        <a class='nav-link btn @(_tabFilter == "All" ? "active" : "")' @onclick='()=>TabFilter("All")'>All</a>
+    </li>
+    <li class="nav-item">
+        <a class='nav-link btn @(_tabFilter == "NotApproved" ? "active" : "")' @onclick='()=>TabFilter("NotApproved")'>Not Approved</a>
+    </li>
+    <li class="nav-item">
+        <a class='nav-link btn @(_tabFilter == "Approved" ? "active" : "")' @onclick='()=>TabFilter("Approved")'>Approved</a>
+    </li>
+</ul>*@
+<table class="table">
+    <thead>
+        <tr>
+            <th>
+                <div class="d-flex">
+                    Item Name
+                    <a class='btn text-@(_sortBy == "itemName" ? "primary" : "secondary")' data-mdb-toggle="tooltip"
+                       @onclick='()=>SortByHandler("itemName")'>
+                        <span class='oi oi-sort-@(_sortBy == "itemName" ? _sortDirection : "ascending")' />
+                    </a>
+                </div>
+            </th>
+
+            <th>
+                <div class="d-flex">
+                    Quantity
+                    <a class='btn text-@(_sortBy == "quantity" ? "primary" : "secondary")' data-mdb-toggle="tooltip"
+                       @onclick='()=>SortByHandler("quantity")'>
+                        <span class='oi oi-sort-@(_sortBy == "quantity" ? _sortDirection : "ascending")' />
+                    </a>
+                </div>
+            </th>
+            <th>Request By</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        @{
+            IEnumerable<Request> requestList = _itemRequests;
+            if (_sortBy == "itemName")
+            {
+                requestList = _sortDirection == "ascending" ? requestList.OrderBy(i => i.ItemName) : requestList.OrderByDescending(i =>
+                i.ItemName);
+            }
+            //else if (_sortBy == "price")
+            //{
+            //    itemRequests = _sortDirection == "ascending" ? itemRequests.OrderBy(i => i.Price) : itemRequests.OrderByDescending(i =>
+            //    i.Price);
+            //}
+            else if (_sortBy == "quantity")
+            {
+                requestList = _sortDirection == "ascending" ? requestList.OrderBy(i => i.Quantity) : requestList.OrderByDescending(i =>
+                i.Quantity);
+            }
+            foreach (var item in requestList)
+            {
+                <tr>
+                    <td>@item.ItemName</td>
+                    <td>@item.Quantity</td>
+                    <td>
+                        @{
+                            var creator = UserService.GetById(item.Request_by);
+                            <span>@(creator == null ? "Unknown" : creator.Username)</span>
+                        }
+                    </td>
+                    <td>
+                        <button disabled="@(_globalState.CurrentUser != null ? _globalState.CurrentUser.Id == item.Id : false)"
+                        class="btn btn-outline-success" type="button" @onclick="()=>ApproveRequestItem(item)">
+                            <span class="oi oi-share" /> Approve
+                        </button>
+                        <button disabled="@(_globalState.CurrentUser != null ? _globalState.CurrentUser.Id == item.Id : false)"
+                        class="btn btn-outline-danger" type="button" @onclick="()=>DeclineRequestItem(item)">
+                            <span class="oi oi-delete" /> Decline
+                        </button>
+                    </td>
+                </tr>
+            }
+        }
+
+    </tbody>
+</table>
+
+@if (_showApproveErrorDialog)
+{
+    <ModalDialog Title="Approve Request Error" OnClose="@OnApproveErrorDialogClose" OkLabel="Ok">
+        @*<p>Are you sure you want to delete <strong>@_itemRequest.RequestItemName</strong> item and its data?</p>*@
+        @if (!string.IsNullOrEmpty(_approveItemErrorMessage))
+        {
+            <AlertMessage Type="danger" Message="@_approveItemErrorMessage" />
+        }
+    </ModalDialog>
+}
+
+
+@code {
+    [CascadingParameter]
+    private GlobalState _globalState { get; set; }
+    private List<ItemModel> _items { get; set; }
+    private List<Request> _itemRequests { get; set; }
+    private List<ItemLog> _itemLogs { get; set; }
+    private Request _itemRequest { get; set; }
+    private List <ItemModel> _itemModel { get; set; }
+    private string _approveItemErrorMessage { get; set; }
+    private bool _showApproveErrorDialog { get; set; }
+    private DateTime _approveDate { get; set; }
+    private string _tabFilter = "All";
+    private string _sortBy = "itemName";
+    private string _sortDirection = "ascending";
+
+
+    protected override void OnInitialized()
+    {
+        _itemRequests = RequestService.GetAll(_globalState.CurrentUser.Id);
+        _items = ItemModelService.GetAll(_globalState.CurrentUser.Id);
+    }
+
+    private void SortByHandler(string sortByName)
+    {
+        if (_sortBy == sortByName)
+        {
+            _sortDirection = _sortDirection == "ascending" ? "descending" : "ascending";
+        }
+        else
+        {
+            _sortBy = sortByName;
+            _sortDirection = "ascending";
+        }
+    }
+
+
+    private void OnApproveErrorDialogClose()
+    {
+        _showApproveErrorDialog = false;
+    }
+
+    private void ApproveRequestItem(Request requestItem)
+    {
+        _itemModel = _items.Where(x => x.Id == requestItem.ItemId).ToList();
+        _itemRequest = requestItem;
+        _approveDate = DateTime.Now;
+
+        foreach (var item in _itemModel)
+        {
+            try
+            {
+                _approveItemErrorMessage = "";
+
+                if (_approveDate.DayOfWeek == DayOfWeek.Saturday || _approveDate.DayOfWeek == DayOfWeek.Sunday)
+                {
+                    _showApproveErrorDialog = true;
+                    throw new Exception("Request cannot be approved on Saturday and Sunday.");
+
+                }
+                else if (_approveDate.TimeOfDay < new TimeSpan(9, 0, 0) || _approveDate.TimeOfDay > new TimeSpan(16, 0, 0))
+                {
+                    _showApproveErrorDialog = true;
+                    throw new Exception("Request can be approved only between 9am and 4pm.");
+                }
+
+                else if ((item.Quantity - requestItem.Quantity) < 0)
+                {
+                    _showApproveErrorDialog = true;
+                    throw new Exception("The requested quantity exceeds stock quantity.");
+
+                }
+
+                //for update inventory qty after approval
+                _items = ItemModelService.Update(_globalState.CurrentUser.Id, item.Id, item.ItemName, item.Price, (item.Quantity - requestItem.Quantity));
+                _itemRequests = RequestService.Delete(_globalState.CurrentUser.Id, requestItem.Id);
+                _itemLogs = ItemLogService.Create(_globalState.CurrentUser.Id, requestItem.Request_by, item.Id, item.ItemName, requestItem.Quantity);
+            }
+            catch (Exception e)
+            {
+                _approveItemErrorMessage = e.Message;
+            }
+
+
+        }
+
+
+
+        //_items = ItemsService.Update(_globalState.CurrentUser.Id, _itemModel.Id, _itemModel.ItemName, _itemModel.Price, (_itemModel.Quantity - requestItem.RequestQuantity));
+
+        //_itemRequests = ItemRequestService.Delete(_globalState.CurrentUser.Id, requestItem.Id);
+
+    }
+
+    private void DeclineRequestItem(Request requestItem)
+    {
+
+        _itemRequests = RequestService.Delete(_globalState.CurrentUser.Id, requestItem.Id);
+
+    }
+
+    
+
+}
